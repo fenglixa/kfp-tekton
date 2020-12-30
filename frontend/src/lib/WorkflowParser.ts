@@ -23,9 +23,9 @@ import {
 } from '../../third_party/argo-ui/argo_template';
 import { statusToIcon } from '../pages/Status';
 import { Constants } from './Constants';
+import { parseTaskDisplayName } from './ParserUtils';
 import { KeyValue } from './StaticGraphParser';
 import { NodePhase, statusToBgColor, statusToPhase } from './StatusUtils';
-import { parseTaskDisplayName } from './ParserUtils';
 
 export enum StorageService {
   GCS = 'gcs',
@@ -34,6 +34,8 @@ export enum StorageService {
   MINIO = 'minio',
   S3 = 's3',
 }
+
+export let matchedValue: object;
 
 export interface StoragePath {
   source: StorageService;
@@ -142,9 +144,43 @@ export default class WorkflowParser {
           statusColoring: statusColoring,
           width: Constants.NODE_WIDTH,
         });
+      } else if (task.taskRef) {
+        // this task is tekton custom task
+        const loopPipelineName = task['taskRef']['name'];
+        const loopPipeline = JSON.parse(
+          workflow['metadata']['annotations']['tekton.dev/' + loopPipelineName],
+        );
+        const loopPipelineTasks = loopPipeline.spec.pipelineSpec.tasks;
+        const customTaskSpec = this.objKeyLookup(workflow, 'f:extraFields');
+        const ctprs = customTaskSpec['f:pipelineRuns'];
+        Object.keys(ctprs).forEach(ctpr => {
+          if (ctpr && ctpr !== '.') {
+            const cttrs = ctprs[ctpr]['f:status']['f:taskRuns'];
+            Object.keys(cttrs).forEach(key => {
+              let taskLable: string = '';
+              if (key && key !== '.') {
+                const ctID = key.split(':')[1];
+                const statusColoring = exitHandlers.includes('hahahaa')
+                  ? '#fef7f0'
+                  : statusToBgColor(NodePhase.SUCCEEDED, '');
+                for (const loopPipelineTask of loopPipelineTasks) {
+                  if (ctID.includes(loopPipelineTask)) {
+                    taskLable = loopPipelineTask;
+                  }
+                }
+                graph.setNode(ctID, {
+                  height: Constants.NODE_HEIGHT,
+                  icon: statusToIcon(NodePhase.SUCCEEDED),
+                  label: taskLable || ctID,
+                  statusColoring: statusColoring,
+                  width: Constants.NODE_WIDTH,
+                });
+              }
+            });
+          }
+        });
       }
     }
-
     return graph;
   }
 
@@ -202,6 +238,27 @@ export default class WorkflowParser {
     }
 
     return edges;
+  }
+
+  // We could have just returned null if there was no match, but then it wouldn't work if your data contained null.
+  private static objKeyLookup(obj: object, search: string): object {
+    // Iterate over the object.
+    Object.keys(obj).forEach(key => {
+      // If we found the key we're looking for, return the matching value.
+      if (key === search) {
+        matchedValue = obj[key];
+        // If we've got a nested object, recursively call objKeyLookup on it.
+      } else if (typeof obj[key] === 'object') {
+        this.objKeyLookup(obj[key], search);
+      }
+      // Otherwise just go onto the next iteration.
+    });
+    // If iterating didn't return any matching keys, return notFound.
+    if (matchedValue) {
+      return matchedValue;
+    } else {
+      return {};
+    }
   }
 
   private static decodeParam(paramString: string) {
