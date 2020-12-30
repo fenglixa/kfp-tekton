@@ -90,7 +90,15 @@ export default class WorkflowParser {
         }
       }
     }
-
+    let anyConditions = {};
+    if (
+      workflow['metadata'] &&
+      workflow['metadata']['annotations'] &&
+      workflow['metadata']['annotations']['anyConditions']
+    ) {
+      anyConditions = JSON.parse(workflow['metadata']['annotations']['anyConditions'] || '{}');
+    }
+    const anyTasks = Object.keys(anyConditions);
     for (const task of tasks) {
       // If the task has a status then add it and its edges to the graph
       if (statusMap.get(task['name']) || conditionTasks.includes(task['name'])) {
@@ -124,7 +132,17 @@ export default class WorkflowParser {
             }
           });
         }
-
+        if (anyTasks.includes(task['name'])) {
+          for (const depTask of anyConditions[task['name']]) {
+            if (
+              statusMap.get(depTask) &&
+              statusMap.get(depTask)!['status']['conditions'][0]['type'] === 'Succeeded'
+            ) {
+              const parentId = statusMap.get(depTask)!['status']['podName'];
+              edges.push({ parent: parentId, child: taskId });
+            }
+          }
+        }
         for (const edge of edges || []) graph.setEdge(edge['parent'], edge['child']);
 
         let status = NodePhase.CONDITIONCHECKFAILED;
