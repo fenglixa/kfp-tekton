@@ -77,9 +77,6 @@ export function _populateInfoFromTask(info: SelectedNodeInfo, task?: any): Selec
   return info;
 }
 
-let loopNumber = 1;
-let loopTaskList: string[] = [];
-
 export function createGraph(workflow: any): dagre.graphlib.Graph {
   const graph = new dagre.graphlib.Graph();
   graph.setGraph({});
@@ -104,7 +101,8 @@ function buildTektonDag(
     (pipeline['spec']['pipelineSpec']['finally'] || []).map((element: any) => {
       return element['name'];
     }) || [];
-
+  let loopNumber = 1;
+  let loopTaskList: string[] = [];
   let anyConditions = {};
   if (
     pipeline['metadata'] &&
@@ -164,14 +162,25 @@ function buildTektonDag(
     }
 
     for (const param of task['params'] || []) {
-      for (const paramValue of param['value'] || []) {
+      if (typeof param['value'] === 'string') {
         if (
-          paramValue.substring(0, 8) === '$(tasks.' &&
-          paramValue.substring(param['value'].length - 1) === ')'
+          param['value'].substring(0, 8) === '$(tasks.' &&
+          param['value'].substring(param['value'].length - 1) === ')'
         ) {
-          const paramSplit = paramValue.split('.');
+          const paramSplit = param['value'].split('.');
           const parentTask = paramSplit[1];
           graph.setEdge(parentTask, taskName);
+        }
+      } else if (typeof param['value'] === 'object') {
+        for (const paramValue of param['value'] || []) {
+          if (
+            paramValue.substring(0, 8) === '$(tasks.' &&
+            paramValue.substring(param['value'].length - 1) === ')'
+          ) {
+            const paramSplit = paramValue.split('.');
+            const parentTask = paramSplit[1];
+            graph.setEdge(parentTask, taskName);
+          }
         }
       }
     }
@@ -205,29 +214,35 @@ function buildTektonDag(
         width: Constants.NODE_WIDTH,
       });
       const loopPipelineName = task['taskRef']['name'];
-      const loopPipeline = JSON.parse(
-        pipeline['metadata']['annotations']['tekton.dev/' + loopPipelineName],
-      );
-      const endLoopName = taskName + '-end';
-      loopTaskList.push(taskName);
-      graph.setNode(endLoopName, {
-        bgColor: bgColor,
-        height: Constants.NODE_HEIGHT,
-        info,
-        label: 'end-loop-' + loopNumber++,
-        width: Constants.NODE_WIDTH,
-      });
-      buildTektonDag(graph, loopPipeline, taskName, endLoopName);
+      if (
+        pipeline['metadata'] &&
+        pipeline['metadata']['annotations'] &&
+        pipeline['metadata']['annotations']['tekton.dev/' + loopPipelineName]
+      ) {
+        const loopPipeline = JSON.parse(
+          pipeline['metadata']['annotations']['tekton.dev/' + loopPipelineName],
+        );
+        const endLoopName = taskName + '-end';
+        loopTaskList.push(taskName);
+        graph.setNode(endLoopName, {
+          bgColor: bgColor,
+          height: Constants.NODE_HEIGHT,
+          info,
+          label: 'end-loop-' + loopNumber++,
+          width: Constants.NODE_WIDTH,
+        });
+        buildTektonDag(graph, loopPipeline, taskName, endLoopName);
+      }
     }
-    if (startloop && endloop) {
-      for (const looptask of tasks) {
-        const loopTaskName = looptask['name'];
-        if (graph.inEdges(loopTaskName)?.length === 0) {
-          graph.setEdge(startloop, loopTaskName);
-        }
-        if (graph.outEdges(loopTaskName)?.length === 0) {
-          graph.setEdge(loopTaskName, endloop);
-        }
+  }
+  if (startloop && endloop) {
+    for (const looptask of tasks) {
+      const loopTaskName = looptask['name'];
+      if (graph.inEdges(loopTaskName)?.length === 0) {
+        graph.setEdge(startloop, loopTaskName);
+      }
+      if (graph.outEdges(loopTaskName)?.length === 0) {
+        graph.setEdge(loopTaskName, endloop);
       }
     }
   }
