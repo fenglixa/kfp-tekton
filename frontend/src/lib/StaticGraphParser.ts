@@ -91,6 +91,7 @@ function buildTektonDag(
   template: any,
   startloop: string = '',
   endloop: string = '',
+  lastlooptask: string = '',
 ): void {
   const pipeline = template;
   const tasks = (pipeline['spec']['pipelineSpec']['tasks'] || []).concat(
@@ -231,17 +232,28 @@ function buildTektonDag(
           label: 'end-loop-' + loopNumber++,
           width: Constants.NODE_WIDTH,
         });
-        buildTektonDag(graph, loopPipeline, taskName, endLoopName);
+        let lastLoopTask = '';
+        if (
+          pipeline['metadata'] &&
+          pipeline['metadata']['labels'] &&
+          pipeline['metadata']['labels']['last-loop-task']
+        ) {
+          lastLoopTask = pipeline['metadata']['labels']['last-loop-task'];
+        }
+        buildTektonDag(graph, loopPipeline, taskName, endLoopName, lastLoopTask);
       }
     }
   }
   if (startloop && endloop) {
+    if (lastlooptask) {
+      graph.setEdge(lastlooptask, endloop);
+    }
     for (const looptask of tasks) {
       const loopTaskName = looptask['name'];
       if (graph.inEdges(loopTaskName)?.length === 0) {
         graph.setEdge(startloop, loopTaskName);
       }
-      if (graph.outEdges(loopTaskName)?.length === 0) {
+      if (lastlooptask === '' && graph.outEdges(loopTaskName)?.length === 0) {
         graph.setEdge(loopTaskName, endloop);
       }
     }
